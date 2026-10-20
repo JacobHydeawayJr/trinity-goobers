@@ -570,4 +570,48 @@ setTimeout(() => {
   catch (e) {
     app.innerHTML = "<pre style='white-space:pre-wrap;color:#FFC72C'>" + esc(e.stack || e.message) + "</pre>";
   }
-}, 0);
+}, 0);// part 11: Category Records shows the manager who achieved each week (overrides the earlier records page)
+function recordTable(el, list) {
+  mount(el, [
+    { key: "season", label: "Season", num: true, fmt: v => seasonLabel(v) },
+    { key: "week", label: "Week", num: true },
+    { key: "name", label: "Manager" },
+    { key: "opp", label: "Opponent" },
+    { key: "value", label: "Total", num: true },
+    { key: "per", label: "Per roster player", num: true },
+  ], list);
+}
+
+routes.records = () => {
+  app.innerHTML = `<h1>Category records</h1>
+    <p class="note">Per roster player uses each season's non-IR roster size. FG% and FT% are rates.</p>
+    <div class="toggle">
+      <button id="rr" class="on">Regular season</button>
+      <button id="rp">Playoffs</button>
+    </div>
+    <select class="search" id="rc-cat">${CATS.map(c =>
+      `<option value="${c}">${esc(CAT_LABEL[c])}</option>`).join("")}</select>
+    <h2>Best five</h2><div id="rb"></div>
+    <h2>Worst five</h2><div id="rw"></div>`;
+  let which = "regular";
+  const draw = () => {
+    const cat = document.getElementById("rc-cat").value;
+    const r = D.records[which][cat];
+    recordTable(document.getElementById("rb"), r.best);
+    recordTable(document.getElementById("rw"), r.worst);
+  };
+  document.getElementById("rr").onclick = () => {
+    which = "regular";
+    document.getElementById("rr").classList.add("on");
+    document.getElementById("rp").classList.remove("on");
+    draw();
+  };
+  document.getElementById("rp").onclick = () => {
+    which = "playoffs";
+    document.getElementById("rp").classList.add("on");
+    document.getElementById("rr").classList.remove("on");
+    draw();
+  };
+  document.getElementById("rc-cat").onchange = draw;
+  draw();
+};
