@@ -9,6 +9,19 @@ style.textContent = `
   tr.row-silver td { background: #B8C4CC !important; color: #0B4429; font-weight: 600; }
   td, th { font-variant-numeric: tabular-nums; }
   table { min-width: 100%; }
+  @media (max-width: 720px) {
+    table { font-size: 0.95rem; }
+    td, th { white-space: normal; min-width: 4.5em; }
+    td.stick, th.stick { position: sticky; left: 0; z-index: 1; background: #0E2A1B; }
+    th.stick { background: #0B4429; }
+    .menu-btn { display: block; width: 100%; text-align: left; background: #FFC72C;
+      color: #0B4429; border: none; border-radius: 8px; padding: 12px 14px;
+      font-size: 1rem; font-weight: 700; cursor: pointer; margin-bottom: 10px; }
+    #nav { display: none; flex-direction: column; gap: 6px; overflow: visible; }
+    #nav.open { display: flex; }
+    #nav a { font-size: 1rem; padding: 10px 14px; }
+  }
+  @media (min-width: 721px) { .menu-btn { display: none; } }
 `;
 document.head.appendChild(style);
 
@@ -31,7 +44,7 @@ function fullDate(season, date) {
   const yr = mi >= 9 ? season - 1 : season;
   return `${date}, ${yr}`;
 }
-// Sort key from a date such as "Feb 13 12:34 PM, 2023" (time removed before parsing)
+// Sort key from a date such as "Feb 13, 2023" (time removed before parsing)
 function dateKey(season, date) {
   const f = fullDate(season, date);
   if (f === "Date not recorded") return 0;
@@ -40,23 +53,27 @@ function dateKey(season, date) {
 }
 
 // Sortable table. Click a header to sort; click again to reverse.
+// The Manager, Person or Champion column is sticky on phones.
 function mount(el, cols, rows, opts = {}) {
   let data = rows.slice(), key = null, asc = true;
+  const nameIdx = cols.findIndex(c => /^(Manager|Person|Champion)/.test(c.label));
   const draw = () => {
-    el.innerHTML = `<div class="table-wrap"><table><thead><tr>${cols.map(c =>
-      `<th data-k="${c.key}" class="${c.num ? "num" : ""}">${esc(c.label)} <span class="arrow">↕</span></th>`
+    el.innerHTML = `<div class="table-wrap"><table><thead><tr>${cols.map((c, i) =>
+      `<th data-k="${c.key}" class="${c.num ? "num" : ""}${i === nameIdx ? " stick" : ""}">${esc(c.label)} <span class="arrow">↕</span></th>`
     ).join("")}</tr></thead><tbody>${data.map(r =>
-      `<tr class="${opts.rowClass ? opts.rowClass(r) : ""}">${cols.map(c => {
+      `<tr class="${opts.rowClass ? opts.rowClass(r) : ""}">${cols.map((c, i) => {
         const raw = c.fmt ? c.fmt(r[c.key], r) : (r[c.key] ?? "");
         const shown = (typeof raw === "number" && !Number.isInteger(raw)) ? raw.toFixed(2) : raw;
-        return `<td class="${c.num ? "num" : ""}">${esc(shown)}</td>`;
+        return `<td class="${c.num ? "num" : ""}${i === nameIdx ? " stick" : ""}">${esc(shown)}</td>`;
       }).join("")}</tr>`).join("")}</tbody></table></div>`;
     el.querySelectorAll("th").forEach(th => th.onclick = () => {
       const k = th.dataset.k;
       asc = key === k ? !asc : true;
       key = k;
+      const col = cols.find(c => c.key === k) || {};
+      const ck = col.sortKey || k;
       data.sort((a, b) => {
-        const ck = (cols.find(c => c.key === k) || {}).sortKey || k; const x = a[ck], y = b[ck];
+        const x = a[ck], y = b[ck];
         if (typeof x === "number" && typeof y === "number") return asc ? x - y : y - x;
         const sx = String(x ?? ""), sy = String(y ?? "");
         return asc ? sx.localeCompare(sy) : sy.localeCompare(sx);
@@ -68,7 +85,6 @@ function mount(el, cols, rows, opts = {}) {
 }
 
 // Picker: a dropdown above one table at a time, like the Managers page.
-// options: [{label, value}]; render(container, value) draws the chosen view.
 function picker(el, options, render) {
   el.innerHTML = `<select class="search">${options.map(o =>
     `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join("")}</select><div class="pkb"></div>`;
@@ -90,8 +106,8 @@ routes.home = () => {
     `<div class="champ"><span class="season">${seasonLabel(c.season)}</span><span>${esc(c.name)}</span></div>`
   ).join("");
   mount(document.getElementById("rec"), [
-    { key: "rank", label: "Rank", num: true, fmt: v => na(v) },
     { key: "name", label: "Manager" },
+    { key: "rank", label: "Rank", num: true, fmt: v => na(v) },
     { key: "seasons_played", label: "Seasons", num: true },
     { key: "w", label: "W", num: true },
     { key: "l", label: "L", num: true },
@@ -376,7 +392,7 @@ routes.trades = () => {
 
   mount(document.getElementById("td"), [
     { key: "season", label: "Season", num: true, fmt: v => seasonLabel(v) },
-      { key: "date", label: "Date", sortKey: "key" },
+    { key: "date", label: "Date", sortKey: "key" },
     { key: "side_a", label: "Side A" },
     { key: "sent_a", label: "Sent by A" },
     { key: "side_b", label: "Side B" },
@@ -526,6 +542,18 @@ routes.records = () => {
   document.getElementById("rc-cat").onchange = draw;
   draw();
 };
+
+// Menu: on phones, a button opens the page list
+(function menu() {
+  const nav = document.getElementById("nav");
+  if (!nav) return;
+  const btn = document.createElement("button");
+  btn.className = "menu-btn";
+  btn.textContent = "☰ Menu";
+  btn.onclick = () => nav.classList.toggle("open");
+  nav.parentNode.insertBefore(btn, nav);
+  nav.addEventListener("click", e => { if (e.target.tagName === "A") nav.classList.remove("open"); });
+})();
 
 function route() {
   const [name, arg] = (location.hash || "#home").slice(1).split("/");
