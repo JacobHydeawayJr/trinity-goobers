@@ -440,7 +440,7 @@ routes.adds = () => {
         { key: "best_season", label: "Season of most adds", num: true, fmt: v => v ? seasonLabel(v) : "N/A" },
         { key: "seasons", label: "Seasons", num: true },
       ], totals) },
-    { label: "Top 5 most added players, all time (2022 to 2026)", render: c =>
+    { label: "Top 25 most added players, all time (2022 to 2026)", render: c =>
       mount(c, playerCols, X.adds_top_all_time || []) },
     { label: "Most added player each season (top 1)", render: c =>
       mount(c, playerCols2, top1) },
@@ -615,3 +615,171 @@ routes.records = () => {
   document.getElementById("rc-cat").onchange = draw;
   draw();
 };
+// part 12: playoff percentages, four-view category records, manager updates, head to head
+const RF = D.records_full || { regular: { league: {}, person: {} }, playoffs: { league: {}, person: {} } };
+const H2H = D.h2h || { regular: {}, playoffs: {} };
+const RMETRICS = [
+  { label: "Regular season average (per roster player)", kind: "regular", m: "avg" },
+  { label: "Regular season total", kind: "regular", m: "total" },
+  { label: "Playoffs average (per roster player)", kind: "playoffs", m: "avg" },
+  { label: "Playoffs total", kind: "playoffs", m: "total" },
+];
+const byName = Object.fromEntries(D.people.map(p => [p.name, p]));
+const seasonsOf = name => byName[name] ? byName[name].seasons_played : 0;
+const ratio = (n, s) => s ? (n / s) * 100 : null;
+const metricOpts = () => RMETRICS.map((m, i) => `<option value="${i}">${esc(m.label)}</option>`).join("");
+
+function recTables(el, view) {
+  if (!view) { el.innerHTML = `<p class="note">No data for this category.</p>`; return; }
+  el.innerHTML = `<h3>Best five</h3><div id="rb5"></div><h3>Worst five</h3><div id="rw5"></div>`;
+  recordTable(document.getElementById("rb5"), view.best.slice(0, 5));
+  recordTable(document.getElementById("rw5"), view.worst.slice(0, 5));
+}
+
+// Playoffs (renamed from Finals): seasons and % of seasons on each count table
+routes.finals = () => {
+  const F = D.finals;
+  const withPct = rows => rows.map(r => {
+    const s = seasonsOf(r.name);
+    return { name: r.name, seasons: s, count: r.count, pct: ratio(r.count, s) };
+  }).sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1) || b.count - a.count);
+  const countCols = [
+    { key: "name", label: "Manager" },
+    { key: "seasons", label: "Seasons", num: true },
+    { key: "count", label: "Total", num: true },
+    { key: "pct", label: "% of seasons", num: true, fmt: v => v == null ? "N/A" : pct(v) },
+  ];
+  const wl = F.playoff_wl
+    .map(r => ({ ...r, pct: (r.w + r.l) ? (r.w / (r.w + r.l)) * 100 : null }))
+    .sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1) || b.w - a.w);
+  const tables = [
+    { label: "Grand finals won", cols: countCols, rows: withPct(F.titles) },
+    { label: "Grand final appearances", cols: countCols, rows: withPct(F.gf_apps) },
+    { label: "Playoff appearances", cols: countCols, rows: withPct(F.playoff_apps) },
+    { label: "Playoff misses", cols: countCols, rows: withPct(F.playoff_misses) },
+    { label: "Playoff match record (sorted by win %)", rows: wl, cols: [
+      { key: "name", label: "Manager" },
+      { key: "w", label: "W", num: true },
+      { key: "l", label: "L", num: true },
+      { key: "pct", label: "Win %", num: true, fmt: v => v == null ? "N/A" : pct(v) },
+    ] },
+    { label: "Champions by draft slot (worst slot to win first)", rows: F.champion_slots, cols: [
+      { key: "season", label: "Season", num: true, fmt: v => seasonLabel(v) },
+      { key: "name", label: "Champion" },
+      { key: "draft_pick", label: "Draft pick", num: true, fmt: v => na(v) },
+    ] },
+  ];
+  app.innerHTML = `<h1>Playoffs</h1>
+    <p class="note">% of seasons = count ÷ seasons completed.</p>
+    <div id="fin"></div>`;
+  picker(document.getElementById("fin"),
+    tables.map((t, i) => ({ label: t.label, value: String(i) })),
+    (box, v) => { const t = tables[+v]; mount(box, t.cols, t.rows); });
+};
+
+// Category Records: regular/playoffs × average/total, league-wide
+routes.records = () => {
+  app.innerHTML = `<h1>Category records</h1>
+    <p class="note">Average is per roster player, per week. Total is the raw week total. FG% and FT% are rates.</p>
+    <select class="search" id="rm">${metricOpts()}</select>
+    <select class="search" id="rc-cat">${CATS.map(c =>
+      `<option value="${c}">${esc(CAT_LABEL[c])}</option>`).join("")}</select>
+    <div id="rcv"></div>`;
+  const draw = () => {
+    const M = RMETRICS[+document.getElementById("rm").value];
+    const cat = document.getElementById("rc-cat").value;
+    const block = RF[M.kind].league[cat];
+    recTables(document.getElementById("rcv"), block ? block[M.m] : null);
+  };
+  document.getElementById("rm").onchange = draw;
+  document.getElementById("rc-cat").onchange = draw;
+  draw();
+};
+
+// Managers: updated line order, rank for draft %, Hall of Fame / Shame, category views and head to head
+function renderManager(p) {
+  const d = p.draft;
+  const best = d && d.most_drafted ? d.most_drafted : null;
+  const dRank = d ? D.draft.findIndex(x => x.person_id === p.person_id) + 1 : 0;
+  document.getElementById("person").innerHTML = `
+    <div class="card">
+      <h2 style="margin-top:0">${esc(p.name)}</h2>
+      <p>Seasons completed: <b>${p.seasons_played}</b> · Titles: <b>${p.titles}</b> ·
+        Grand finals: <b>${p.gf_apps}</b> · Playoffs: <b>${p.playoff_apps}</b> · Playoff misses: <b>${p.playoff_misses}</b></p>
+      <p>Overall record: <b>${p.w}-${p.l}-${p.t}</b> (${pct(p.win_pct)}) · Rank:
+        <b>${p.rank != null ? "#" + p.rank + " of " + D.home.ranked_of : "N/A"}</b></p>
+      <p>Playoff record: <b>${p.po_w}-${p.po_l}</b> · Grand final record: <b>${p.gf_w}-${p.gf_l}</b></p>
+      <p>Last in regular season: <b>${p.rs_last}</b></p>
+      <p>Hall of Fame / Shame: <b>${p.hall_9_0}</b> nine-category weeks (Fame) ·
+        <b>${p.hall_0_9}</b> zero-category weeks (Shame)</p>
+      <p>Average draft %: <b>${d ? pct(d.avg_pct) : "N/A"}</b>${dRank
+        ? " · Rank: <b>#" + dRank + " of " + D.draft.length + "</b>" : ""}</p>
+      <p>Most drafted: <b>${best ? esc(best.players.join(", ")) + " (" + best.count + " times)" : "N/A"}</b></p>
+    </div>
+    <h2>By season</h2><div id="ps"></div>
+    <h2>Category records</h2>
+    <select class="search" id="pm">${metricOpts()}</select>
+    <select class="search" id="pc">${CATS.map(c =>
+      `<option value="${c}">${esc(CAT_LABEL[c])}</option>`).join("")}</select>
+    <div id="pv"></div>
+    <h2>Season averages (per roster player, weekly)</h2><div id="sa"></div>
+    <h2>Head to head</h2>
+    <div class="toggle">
+      <button id="hr" class="on">Regular season</button>
+      <button id="hp">Playoffs</button>
+    </div>
+    <div id="h2h"></div>`;
+
+  mount(document.getElementById("ps"), [
+    { key: "season", label: "Season", num: true, fmt: v => seasonLabel(v) },
+    { key: "team_name", label: "Team this season" },
+    { key: "record", label: "W-L-T" },
+    { key: "rs_pos", label: "RS pos", num: true, fmt: v => na(v) },
+    { key: "draft_pick", label: "Draft pick", num: true, fmt: v => na(v) },
+    { key: "final_pos", label: "Final pos", num: true, fmt: v => na(v) },
+    { key: "status", label: "Result" },
+  ], p.season_rows);
+
+  const drawPM = () => {
+    const M = RMETRICS[+document.getElementById("pm").value];
+    const cat = document.getElementById("pc").value;
+    const blk = RF[M.kind].person[p.person_id];
+    recTables(document.getElementById("pv"), blk && blk[cat] ? blk[cat][M.m] : null);
+  };
+  document.getElementById("pm").onchange = drawPM;
+  document.getElementById("pc").onchange = drawPM;
+  drawPM();
+
+  mount(document.getElementById("sa"), [
+    { key: "cat", label: "Category" },
+    { key: "best", label: "Best weekly avg", num: true, fmt: v => v ?? "N/A" },
+    { key: "best_season", label: "Season", num: true, fmt: v => v ? seasonLabel(v) : "N/A" },
+    { key: "worst", label: "Worst weekly avg", num: true, fmt: v => v ?? "N/A" },
+    { key: "worst_season", label: "Season", num: true, fmt: v => v ? seasonLabel(v) : "N/A" },
+  ], CATS.map(c => {
+    const s = p.season_avgs && p.season_avgs[c];
+    return { cat: CAT_LABEL[c],
+      best: s ? s.best.avg : null, best_season: s ? s.best.season : null,
+      worst: s ? s.worst.avg : null, worst_season: s ? s.worst.season : null };
+  }));
+
+  let h2hKind = "regular";
+  const hr = document.getElementById("hr"), hp = document.getElementById("hp");
+  const drawH2H = () => {
+    const rows = ((H2H[h2hKind] || {})[p.person_id] || [])
+      .filter(r => r.games > 0)
+      .map(r => ({ opp: r.opp, w: r.w, l: r.l, t: r.t, games: r.games, pct: r.pct }))
+      .sort((a, b) => b.pct - a.pct || b.games - a.games);
+    mount(document.getElementById("h2h"), [
+      { key: "opp", label: "Manager (opponent)" },
+      { key: "w", label: "W", num: true },
+      { key: "l", label: "L", num: true },
+      { key: "t", label: "T", num: true },
+      { key: "games", label: "Games", num: true },
+      { key: "pct", label: "Win %", num: true, fmt: pct },
+    ], rows);
+  };
+  hr.onclick = () => { h2hKind = "regular"; hr.classList.add("on"); hp.classList.remove("on"); drawH2H(); };
+  hp.onclick = () => { h2hKind = "playoffs"; hp.classList.add("on"); hr.classList.remove("on"); drawH2H(); };
+  drawH2H();
+}

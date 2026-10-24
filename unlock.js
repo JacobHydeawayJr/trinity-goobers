@@ -1,5 +1,5 @@
 const FILES = ["seasons", "home", "draft", "records", "hall_of_shame",
-               "finals", "trades", "adds", "site_trades", "people", "extra"];
+               "finals", "trades", "adds", "site_trades", "people", "extra", "records_full", "h2h"];
 const ITER = 200000;   // must match encrypt_site.py
 
 const nav = document.getElementById("nav");
